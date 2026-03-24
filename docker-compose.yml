@@ -1,0 +1,160 @@
+# Production RAG — Docker Compose
+#
+# Profiles:
+#   dev   — FastAPI + Weaviate + Redis (minimal, no GPU)
+#   full  — adds Streamlit, Arq worker, Prometheus, Grafana, OTel Collector
+#
+# Usage:
+#   dev:   docker compose --profile dev up
+#   full:  docker compose --profile full up
+#
+# Secrets are read from .env (copy .env.example → .env first)
+
+x-api-env: &api-env
+  env_file: .env
+  environment:
+    WEAVIATE_URL: http://weaviate:8080
+    REDIS_URL: redis://redis:6379/0
+    OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+
+x-healthcheck-defaults: &hc
+  interval: 15s
+  timeout: 5s
+  retries: 5
+  start_period: 30s
+
+services:
+  # ── Vector store ─────────────────────────────────────────────────────────
+  weaviate:
+    image: semitechnologies/weaviate:1.27.0
+    profiles: [dev, full]
+    ports:
+      - "8080:8080"
+      - "50051:50051"
+    environment:
+      QUERY_DEFAULTS_LIMIT: 25
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "true"
+      PERSISTENCE_DATA_PATH: /var/lib/weaviate
+      DEFAULT_VECTORIZER_MODULE: none
+      ENABLE_MODULES: ""
+      CLUSTER_HOSTNAME: node1
+    volumes:
+      - weaviate_data:/var/lib/weaviate
+    healthcheck:
+      <<: *hc
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/v1/.well-known/ready"]
+
+  # ── Message broker / job queue ────────────────────────────────────────────
+  redis:
+    image: redis:7.2-alpine
+    profiles: [dev, full]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      <<: *hc
+      test: ["CMD", "redis-cli", "ping"]
+
+  # ── FastAPI serving ───────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    profiles: [dev, full]
+    ports:
+      - "8000:8000"
+    <<: *api-env
+    depends_on:
+      weaviate:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      <<: *hc
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/live"]
+    restart: unless-stopped
+
+  # ── Arq background worker ─────────────────────────────────────────────────
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    profiles: [full]
+    command: ["python", "-m", "arq", "production_rag.ingestion.worker.WorkerSettings"]
+    <<: *api-env
+    depends_on:
+      weaviate:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Streamlit UI ──────────────────────────────────────────────────────────
+  streamlit:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    profiles: [full]
+    command: ["streamlit", "run", "ui/streamlit_app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+    ports:
+      - "8501:8501"
+    environment:
+      RAG_API_URL: http://api:8000
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Observability stack ───────────────────────────────────────────────────
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.106.1
+    profiles: [full]
+    volumes:
+      - ./deploy/otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+    depends_on: []
+
+  prometheus:
+    image: prom/prometheus:v2.54.0
+    profiles: [full]
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=30d"
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    profiles: [full]
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_password
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./deploy/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./deploy/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    secrets:
+      - grafana_password
+    depends_on:
+      - prometheus
+
+secrets:
+  grafana_password:
+    file: ./secrets/grafana_password.txt
+
+volumes:
+  weaviate_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:

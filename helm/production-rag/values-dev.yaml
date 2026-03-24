@@ -1,0 +1,39 @@
+# values-dev.yaml — minimal local k8s cluster
+
+replicaCount: 1
+
+api:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+  autoscaling:
+    enabled: false
+
+worker:
+  enabled: true
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 2Gi
+
+streamlit:
+  enabled: true
+
+weaviate:
+  storage:
+    size: 5Gi
+
+serviceMonitor:
+  enabled: false
+
+env:
+  LOG_LEVEL: DEBUG
+  ENVIRONMENT: development

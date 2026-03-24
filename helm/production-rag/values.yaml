@@ -1,0 +1,114 @@
+# Default values for production-rag Helm chart.
+# Override per environment:  helm upgrade -f values-prod.yaml …
+
+replicaCount: 2
+
+image:
+  repository: ghcr.io/your-org/production-rag
+  pullPolicy: IfNotPresent
+  tag: ""  # Defaults to .Chart.AppVersion
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# ── API ───────────────────────────────────────────────────────────────────────
+api:
+  port: 8000
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+  podDisruptionBudget:
+    maxUnavailable: 1
+
+# ── Worker ────────────────────────────────────────────────────────────────────
+worker:
+  enabled: true
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 250m
+      memory: 1Gi
+    limits:
+      cpu: 1000m
+      memory: 6Gi
+
+# ── Streamlit UI ──────────────────────────────────────────────────────────────
+streamlit:
+  enabled: true
+  replicaCount: 1
+  port: 8501
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+
+# ── Weaviate (subchart or external) ──────────────────────────────────────────
+weaviate:
+  enabled: true  # set false to use external Weaviate
+  url: ""        # override if external
+  image:
+    tag: "1.27.0"
+  storage:
+    size: 50Gi
+    storageClassName: standard
+  resources:
+    requests:
+      memory: 2Gi
+      cpu: 500m
+    limits:
+      memory: 8Gi
+      cpu: 2000m
+
+# ── Redis ────────────────────────────────────────────────────────────────────
+redis:
+  enabled: true   # set false to use external Redis
+  url: ""         # override if external
+  storage:
+    size: 5Gi
+
+# ── Ingress ──────────────────────────────────────────────────────────────────
+ingress:
+  enabled: false
+  className: nginx
+  annotations: {}
+  hosts:
+    - host: rag.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# ── Config via environment variables ─────────────────────────────────────────
+# These are injected from a Kubernetes Secret named `production-rag-secrets`
+# Create the secret before deploying:
+#   kubectl create secret generic production-rag-secrets \
+#     --from-env-file=.env
+env:
+  LOG_LEVEL: INFO
+  ENVIRONMENT: production
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+
+# ── ServiceMonitor (Prometheus Operator) ─────────────────────────────────────
+serviceMonitor:
+  enabled: false
+  namespace: monitoring
+  interval: 30s
+  path: /metrics

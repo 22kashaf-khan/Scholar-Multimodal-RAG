@@ -1,0 +1,148 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "production-rag-pipeline"
+version = "0.1.0"
+description = "Expert-level production RAG pipeline: Weaviate hybrid search, RRF, MMR, RAPTOR, CRAG, Self-RAG"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+dependencies = [
+    # Vector store
+    "weaviate-client>=4.9.0",
+
+    # LLM orchestration
+    "langchain>=0.3.0",
+    "langchain-community>=0.3.0",
+    "langchain-core>=0.3.0",
+    "langchain-text-splitters>=0.3.0",
+    "langchain-experimental>=0.3.0",
+    "langchain-openai>=0.3.0",
+    "langchain-anthropic>=0.3.0",
+    "langgraph>=0.3.0",
+
+    # LlamaIndex
+    "llama-index>=0.12.0",
+    "llama-index-core>=0.12.0",
+    "llama-index-readers-file>=0.4.0",
+    "llama-index-postprocessor-cohere-rerank>=0.3.0",
+
+    # Provider-agnostic LLM gateway
+    "litellm>=1.56.0",
+
+    # Embeddings
+    "sentence-transformers>=3.3.0",
+
+    # RAPTOR dependencies
+    "umap-learn>=0.5.6",
+    "scikit-learn>=1.5.0",
+    "numpy>=1.26.0",
+
+    # PDF / document loading
+    "pymupdf>=1.24.0",
+    "arxiv>=2.1.0",
+
+    # Reranking
+    "cohere>=5.11.0",
+
+    # API serving
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "sse-starlette>=2.1.0",
+    "slowapi>=0.1.9",
+    "python-jose[cryptography]>=3.3.0",
+    "httpx>=0.27.0",
+
+    # Background job queue
+    "arq>=0.26.0",
+    "redis>=5.2.0",
+
+    # Evaluation
+    "ragas>=0.2.0",
+    "datasets>=3.2.0",
+
+    # Observability
+    "opentelemetry-sdk>=1.28.0",
+    "opentelemetry-api>=1.28.0",
+    "opentelemetry-exporter-otlp>=1.28.0",
+    "opentelemetry-instrumentation-fastapi>=0.49b0",
+    "opentelemetry-instrumentation-httpx>=0.49b0",
+    "langsmith>=0.2.0",
+    "prometheus-client>=0.21.0",
+
+    # Utilities
+    "pydantic>=2.10.0",
+    "pydantic-settings>=2.6.0",
+    "tenacity>=9.0.0",
+    "structlog>=24.4.0",
+    "tiktoken>=0.8.0",
+    "python-dotenv>=1.0.0",
+    "rich>=13.9.0",
+    "typer>=0.15.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=6.0.0",
+    "pytest-mock>=3.14.0",
+    "testcontainers[weaviate]>=4.8.0",
+    "ruff>=0.8.0",
+    "mypy>=1.13.0",
+    "types-redis>=4.6.0",
+    "ipykernel>=6.29.0",
+    "jupyter>=1.1.0",
+]
+ui = [
+    "streamlit>=1.40.0",
+    "streamlit-extras>=0.4.0",
+]
+late-chunking = [
+    # Jina long-context embedding support (optional heavy dep)
+    "transformers>=4.46.0",
+    "torch>=2.5.0",
+]
+
+[project.scripts]
+rag = "production_rag.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/production_rag"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "unit: pure unit tests, no external services",
+    "integration: tests that require Weaviate/Redis/LLM services",
+    "slow: long-running tests (ablation, RAPTOR ingestion)",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "ANN", "S", "B", "A", "COM", "C4", "RUF"]
+ignore = [
+    "ANN101", "ANN102",  # self/cls type hints
+    "S101",              # allow assert in tests
+    "COM812",            # trailing comma (conflicts with formatter)
+]
+per-file-ignores = { "tests/**" = ["S", "ANN"] }
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+plugins = ["pydantic.mypy"]

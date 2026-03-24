@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/settings.json
+.idea/
+
+# Environment files (NEVER commit secrets)
+.env
+.env.local
+.env.*.local
+
+# Testing & coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.ruff_cache/
+.mypy_cache/
+
+# Notebooks checkpoints
+.ipynb_checkpoints/
+
+# Data (large corpora live outside repo)
+data/raw/
+data/embeddings/
+*.pdf
+
+# Model weights
+models/
+
+# Docker
+*.tar
+
+# OS
+.DS_Store
+Thumbs.db

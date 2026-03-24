@@ -1,0 +1,13 @@
+apiVersion: v2
+name: production-rag
+description: Expert-level production RAG pipeline (Weaviate + FastAPI + CRAG + Self-RAG)
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - rag
+  - llm
+  - weaviate
+  - nlp
+maintainers:
+  - name: platform-team

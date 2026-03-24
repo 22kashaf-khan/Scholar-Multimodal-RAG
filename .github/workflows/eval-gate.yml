@@ -1,0 +1,87 @@
+name: Eval Gate (RAGAS regression)
+
+# Runs nightly + on release candidates to ensure we don't regress
+# on RAGAS faithfulness/recall thresholds before shipping.
+
+on:
+  schedule:
+    - cron: "0 2 * * *"   # 02:00 UTC nightly
+  workflow_dispatch:
+    inputs:
+      dataset:
+        description: "Dataset to evaluate (qasper or sciq)"
+        required: false
+        default: qasper
+      n_samples:
+        description: "Number of evaluation samples"
+        required: false
+        default: "100"
+
+env:
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  ragas-eval:
+    name: RAGAS evaluation
+    runs-on: ubuntu-latest
+    services:
+      weaviate:
+        image: semitechnologies/weaviate:1.26.1
+        ports: ["8080:8080"]
+        env:
+          AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "true"
+          PERSISTENCE_DATA_PATH: /tmp/weaviate
+          DEFAULT_VECTORIZER_MODULE: none
+          ENABLE_MODULES: ""
+          CLUSTER_HOSTNAME: eval-node
+        options: >-
+          --health-cmd "wget -qO- http://localhost:8080/v1/.well-known/ready"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7.2-alpine
+        ports: ["6379:6379"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install deps
+        run: pip install -e ".[eval]"
+
+      - name: Run RAGAS suite
+        env:
+          WEAVIATE_URL: http://localhost:8080
+          REDIS_URL: redis://localhost:6379/0
+          LLM_MODEL_NAME: gpt-4o-mini
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          COHERE_API_KEY: ${{ secrets.COHERE_API_KEY }}
+        run: |
+          python -m production_rag.evaluation.ragas_suite \
+            --dataset ${{ github.event.inputs.dataset || 'qasper' }} \
+            --n ${{ github.event.inputs.n_samples || '100' }} \
+            --fail-fast
+
+      - name: Upload eval results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ragas-results-${{ github.run_id }}
+          path: eval_results/ragas_*.json
+          retention-days: 90
+
+      - name: Post results summary
+        if: always()
+        run: |
+          latest=$(ls -t eval_results/ragas_*.json 2>/dev/null | head -1)
+          if [ -n "$latest" ]; then
+            echo "### RAGAS Evaluation Results" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`json" >> $GITHUB_STEP_SUMMARY
+            cat "$latest" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          fi
