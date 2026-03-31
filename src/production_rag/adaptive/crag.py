@@ -66,6 +66,7 @@ class CRAGLoop:
         )
 
         if quality >= self._threshold:
+            initial_diagnostics.quality_score = quality
             return initial_chunks, initial_diagnostics, 0
 
         chunks = initial_chunks
@@ -104,4 +105,5 @@ class CRAGLoop:
                 quality=round(quality, 3),
             )
 
+        diagnostics.quality_score = quality
         return chunks, diagnostics, hops

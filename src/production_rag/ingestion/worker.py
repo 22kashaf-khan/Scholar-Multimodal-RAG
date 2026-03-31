@@ -14,6 +14,7 @@ from production_rag.core.logging import configure_logging
 from production_rag.core.types import ChunkStrategy
 from production_rag.ingestion.loaders.arxiv_loader import ArXivLoader
 from production_rag.ingestion.loaders.pdf import PDFLoader
+from production_rag.ingestion.loaders.docling_pdf import DoclingPDFLoader
 from production_rag.ingestion.pipeline import IngestionConfig, IngestionPipeline
 from production_rag.vectorstore.tenant_manager import TenantManager
 from production_rag.vectorstore.weaviate_client import WeaviateClient
@@ -56,7 +57,10 @@ async def ingest_documents(
         log.info("worker.arxiv_loaded", count=len(docs))
 
     if pdf_paths:
-        pdf_loader = PDFLoader()
+        use_docling = chunking_strategy == "docling"
+        pdf_loader: PDFLoader | DoclingPDFLoader = (
+            DoclingPDFLoader() if use_docling else PDFLoader()
+        )
         for path in pdf_paths:
             docs = await pdf_loader.load(path)
             documents.extend(docs)

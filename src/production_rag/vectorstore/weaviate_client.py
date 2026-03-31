@@ -47,6 +47,7 @@ def _chunk_to_properties(chunk: Chunk) -> dict[str, Any]:
         "publication_year": chunk.publication_year,
         "authors": chunk.authors,
         "tenant_id": chunk.tenant_id,
+        "chunk_type": chunk.chunk_type,
     }
 
 
@@ -71,6 +72,7 @@ def _prop_to_chunk(props: dict[str, Any]) -> Chunk:
         title=props.get("title", ""),
         authors=props.get("authors", []),
         tenant_id=props.get("tenant_id", "default"),
+        chunk_type=props.get("chunk_type", "text"),
     )
 
 
@@ -123,6 +125,19 @@ class WeaviateClient:
         def _create() -> None:
             if client.collections.exists(COLLECTION_NAME):
                 log.info("weaviate.schema.exists", collection=COLLECTION_NAME)
+                # Migration: add chunk_type if the collection pre-dates it
+                col = client.collections.get(COLLECTION_NAME)
+                existing = {p.name for p in col.config.get().properties}
+                if "chunk_type" not in existing:
+                    from weaviate.classes.config import DataType, Property, Tokenization
+                    col.config.add_property(Property(
+                        name="chunk_type",
+                        data_type=DataType.TEXT,
+                        tokenization=Tokenization.FIELD,
+                        index_filterable=True,
+                        index_searchable=False,
+                    ))
+                    log.info("weaviate.schema.migrated", added="chunk_type")
                 return
             client.collections.create(**cfg)
             log.info("weaviate.schema.created", collection=COLLECTION_NAME)
@@ -146,7 +161,7 @@ class WeaviateClient:
         client = self._get_client()
 
         def _upsert() -> None:
-            collection = client.collections.get(COLLECTION_NAME)
+            collection = client.collections.get(COLLECTION_NAME).with_tenant(tenant_id)
             with collection.batch.fixed_size(batch_size=100) as batch:
                 for chunk in chunks:
                     vectors = {}
@@ -159,7 +174,6 @@ class WeaviateClient:
                         properties=_chunk_to_properties(chunk),
                         vector=vectors if vectors else None,
                         uuid=str(uuid.uuid5(uuid.NAMESPACE_DNS, chunk.chunk_id)),
-                        tenant=tenant_id,
                     )
 
             if hasattr(batch, "failed_objects") and batch.failed_objects:
@@ -184,14 +198,13 @@ class WeaviateClient:
         client = self._get_client()
 
         def _search() -> list[Any]:
-            collection = client.collections.get(COLLECTION_NAME)
+            collection = client.collections.get(COLLECTION_NAME).with_tenant(tenant_id)
             result = collection.query.near_vector(
                 near_vector=query_vector,
                 limit=top_k,
                 target_vector=named_vector,
                 filters=filters,
                 return_metadata=MetadataQuery(distance=True, score=True),
-                tenant=tenant_id,
             )
             return result.objects
 
@@ -220,14 +233,13 @@ class WeaviateClient:
         props = query_properties or ["chunk_text", "title"]
 
         def _search() -> list[Any]:
-            collection = client.collections.get(COLLECTION_NAME)
+            collection = client.collections.get(COLLECTION_NAME).with_tenant(tenant_id)
             result = collection.query.bm25(
                 query=query,
                 query_properties=props,
                 limit=top_k,
                 filters=filters,
                 return_metadata=MetadataQuery(score=True),
-                tenant=tenant_id,
             )
             return result.objects
 
@@ -258,7 +270,7 @@ class WeaviateClient:
         client = self._get_client()
 
         def _search() -> list[Any]:
-            collection = client.collections.get(COLLECTION_NAME)
+            collection = client.collections.get(COLLECTION_NAME).with_tenant(tenant_id)
             result = collection.query.hybrid(
                 query=query,
                 vector=query_vector,
@@ -268,7 +280,6 @@ class WeaviateClient:
                 fusion_type=wvc.query.HybridFusion.RELATIVE_SCORE,
                 filters=filters,
                 return_metadata=MetadataQuery(score=True),
-                tenant=tenant_id,
             )
             return result.objects
 
@@ -292,11 +303,10 @@ class WeaviateClient:
         client = self._get_client()
 
         def _fetch() -> list[Any]:
-            collection = client.collections.get(COLLECTION_NAME)
+            collection = client.collections.get(COLLECTION_NAME).with_tenant(tenant_id)
             result = collection.query.fetch_objects(
                 filters=Filter.by_property("chunk_id").equal(chunk_id),
                 limit=1,
-                tenant=tenant_id,
             )
             return result.objects
 
@@ -316,7 +326,7 @@ class WeaviateClient:
         client = self._get_client()
 
         def _fetch() -> list[Any]:
-            collection = client.collections.get(COLLECTION_NAME)
+            collection = client.collections.get(COLLECTION_NAME).with_tenant(tenant_id)
             result = collection.query.fetch_objects(
                 filters=(
                     Filter.by_property("doc_id").equal(doc_id)
@@ -324,7 +334,6 @@ class WeaviateClient:
                     & Filter.by_property("chunk_index").less_or_equal(index_max)
                 ),
                 limit=index_max - index_min + 1,
-                tenant=tenant_id,
             )
             return result.objects
 

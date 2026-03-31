@@ -9,6 +9,7 @@ from production_rag.ingestion.chunkers.recursive import RecursiveChunker
 from production_rag.ingestion.chunkers.hierarchical import HierarchicalChunker
 from production_rag.ingestion.chunkers.semantic import SemanticChunker
 from production_rag.ingestion.chunkers.late import LateChunker
+from production_rag.ingestion.chunkers.docling import DoclingChunker
 
 
 def get_chunker(
@@ -37,5 +38,7 @@ def get_chunker(
         return SemanticChunker(embedder=embedder, **kwargs)  # type: ignore[arg-type]
     if s == ChunkStrategy.LATE:
         return LateChunker(**kwargs)  # type: ignore[arg-type]
+    if s == ChunkStrategy.DOCLING:
+        return DoclingChunker()
 
     raise ValueError(f"Unknown chunking strategy: {strategy}")

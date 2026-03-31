@@ -48,7 +48,7 @@ async def chat(
                 yield event
         except Exception as e:
             from production_rag.generation.streaming import error_event
-            yield {"data": error_event("pipeline_error", "Internal retrieval error").to_sse()}
+            yield error_event("pipeline_error", "Internal retrieval error").to_json()
 
     return EventSourceResponse(
         _event_generator(),

@@ -20,6 +20,13 @@ provided source passages below.  Follow these rules strictly:
 3. Do NOT make up information beyond what the sources contain.
 4. Be precise and technical; this audience is domain experts.
 5. If the sources are insufficient to answer fully, say so explicitly.
+
+TABLE HANDLING:
+- Source passages marked with [TABLE]...[/TABLE] contain structured tabular data.
+- When a question is about a table, extract and present the relevant rows, columns,
+  and numeric values directly from the [TABLE] block — do not paraphrase or omit numbers.
+- If the table uses markdown or space-aligned formatting, reproduce it as a markdown table.
+- Always cite the [SOURCE N] that contains the table data.
 """
 
 _CONTEXT_HEADER = "SOURCE PASSAGES:\n" + "─" * 60
@@ -37,7 +44,10 @@ def _build_context_block(chunks: list[RetrievedChunk]) -> tuple[str, dict[int, R
             f"| page: {c.page} | arxiv: {c.arxiv_id}]"
         )
         text = chunk.display_text
-        lines.append(f"\n{header}\n{text}")
+        if getattr(c, "chunk_type", "text") == "table":
+            lines.append(f"\n{header} [TABLE]\n{text}\n[/TABLE]")
+        else:
+            lines.append(f"\n{header}\n{text}")
         source_map[i] = chunk
 
     return "\n".join(lines), source_map

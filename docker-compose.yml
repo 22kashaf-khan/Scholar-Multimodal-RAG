@@ -53,8 +53,11 @@ services:
     volumes:
       - redis_data:/data
     healthcheck:
-      <<: *hc
       test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 10
+      start_period: 0s
 
   # ── FastAPI serving ───────────────────────────────────────────────────────
   api:
@@ -82,9 +85,19 @@ services:
       context: .
       dockerfile: Dockerfile
       target: production
-    profiles: [full]
+    profiles: [dev, full]
     command: ["python", "-m", "arq", "production_rag.ingestion.worker.WorkerSettings"]
     <<: *api-env
+    volumes:
+      - uploads_data:/uploads
+    networks:
+      - default
+      - care-gpt
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     depends_on:
       weaviate:
         condition: service_healthy
@@ -98,12 +111,19 @@ services:
       context: .
       dockerfile: Dockerfile
       target: production
-    profiles: [full]
+    profiles: [dev, full]
     command: ["streamlit", "run", "ui/streamlit_app.py", "--server.port=8501", "--server.address=0.0.0.0"]
     ports:
       - "8501:8501"
     environment:
       RAG_API_URL: http://api:8000
+    volumes:
+      - uploads_data:/uploads
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     depends_on:
       api:
         condition: service_healthy
@@ -139,22 +159,22 @@ services:
       - "3000:3000"
     environment:
       GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_password
+      GF_SECURITY_ADMIN_PASSWORD: admin
     volumes:
       - grafana_data:/var/lib/grafana
       - ./deploy/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
       - ./deploy/grafana/datasources:/etc/grafana/provisioning/datasources:ro
-    secrets:
-      - grafana_password
     depends_on:
       - prometheus
 
-secrets:
-  grafana_password:
-    file: ./secrets/grafana_password.txt
+networks:
+  care-gpt:
+    external: true
+    name: care-gpt_care-gpt-network
 
 volumes:
   weaviate_data:
   redis_data:
+  uploads_data:
   prometheus_data:
   grafana_data:

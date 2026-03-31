@@ -16,16 +16,18 @@ FROM base AS builder
 COPY pyproject.toml README.md ./
 COPY src/ src/
 
-# Install hatchling + all deps into a prefix
+# Install hatchling + all deps into a prefix (include [ui] for streamlit)
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --no-deps hatchling hatch-vcs && \
-    pip install --prefix=/install "."
+    pip install --prefix=/install ".[ui]"
 
 # ── Production ────────────────────────────────────────────────────────────────
 FROM base AS production
 
 # Non-root user
-RUN useradd --create-home --shell /bin/bash rag
+RUN useradd --create-home --shell /bin/bash rag && \
+    mkdir -p /uploads && \
+    chmod 777 /uploads
 USER rag
 WORKDIR /home/rag/app
 

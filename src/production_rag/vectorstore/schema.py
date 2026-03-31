@@ -140,6 +140,14 @@ PROPERTIES: list[Property] = [
         index_filterable=True,
         index_searchable=False,
     ),
+    Property(
+        name="chunk_type",
+        data_type=DataType.TEXT,
+        description="Content type: text | table | figure.",
+        tokenization=Tokenization.FIELD,
+        index_filterable=True,
+        index_searchable=False,
+    ),
 ]
 
 

@@ -24,6 +24,10 @@ class SSEEvent:
         payload = json.dumps({"type": self.type, "data": self.data})
         return f"data: {payload}\n\n"
 
+    def to_json(self) -> str:
+        """Return JSON payload only (no SSE framing) for EventSourceResponse."""
+        return json.dumps({"type": self.type, "data": self.data})
+
 
 def context_chunk_event(chunk: RetrievedChunk, index: int) -> SSEEvent:
     c = chunk.chunk
@@ -38,6 +42,7 @@ def context_chunk_event(chunk: RetrievedChunk, index: int) -> SSEEvent:
             "page": c.page,
             "snippet": chunk.display_text[:300],
             "score": round(chunk.rerank_score or chunk.rrf_score, 4),
+            "chunk_type": getattr(c, "chunk_type", "text"),
         },
     )
 
@@ -72,6 +77,7 @@ def diagnostics_event(d: RetrievalDiagnostics) -> SSEEvent:
             "reranked_count": d.reranked_count,
             "top_k_used": d.top_k_used,
             "adaptive_hops": d.adaptive_hops,
+            "quality_score": round(d.quality_score, 4),
             "query_variants": d.query_variants_used,
         },
     )
@@ -92,19 +98,19 @@ async def rag_sse_stream(
     synthesizer: object,  # Synthesizer
     citations: list[Citation] | None = None,
 ) -> AsyncGenerator[str, None]:
-    """Full SSE stream generator for a RAG response. Yields raw SSE strings."""
+    """Full SSE stream generator for a RAG response. Yields JSON payload strings."""
     for i, chunk in enumerate(chunks):
-        yield context_chunk_event(chunk, i).to_sse()
+        yield context_chunk_event(chunk, i).to_json()
 
 
     full_answer = ""
     try:
         async for token in synthesizer.stream(query, chunks):  # type: ignore[attr-defined]
             full_answer += token
-            yield token_event(token).to_sse()
+            yield token_event(token).to_json()
     except Exception as e:
         log.error("sse_stream.generation_failed", error=str(e))
-        yield error_event("generation_failed", str(e)).to_sse()
+        yield error_event("generation_failed", str(e)).to_json()
         return
 
     if citations is None:
@@ -113,8 +119,8 @@ async def rag_sse_stream(
         citations = _extract_citations(full_answer, source_map)
 
     for citation in citations:
-        yield citation_event(citation).to_sse()
+        yield citation_event(citation).to_json()
 
-    yield diagnostics_event(diagnostics).to_sse()
+    yield diagnostics_event(diagnostics).to_json()
 
-    yield done_event().to_sse()
+    yield done_event().to_json()

@@ -21,6 +21,7 @@ class ChunkStrategy(str, Enum):
     SEMANTIC = "semantic"
     HIERARCHICAL = "hierarchical"
     LATE = "late"
+    DOCLING = "docling"
 
 
 class QueryComplexity(str, Enum):
@@ -60,6 +61,9 @@ class Chunk:
     publication_year: int = 0
     title: str = ""
     authors: list[str] = field(default_factory=list)
+
+    # Chunk type — "text" | "table" | "figure"
+    chunk_type: str = "text"
 
     # Multi-tenancy
     tenant_id: str = "default"
@@ -127,6 +131,7 @@ class RetrievalDiagnostics:
     reranked_count: int
     top_k_used: int
     adaptive_hops: int = 0
+    quality_score: float = 0.0
     query_variants_used: list[str] = field(default_factory=list)
 
 

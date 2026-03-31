@@ -37,6 +37,11 @@ def _init_state() -> None:
 _init_state()
 
 
+def _auth_headers() -> dict[str, str]:
+    tok = st.session_state.jwt_token
+    return {"Authorization": f"Bearer {tok}"} if tok else {}
+
+
 with st.sidebar:
     st.header("⚙️ Configuration")
 
@@ -67,6 +72,43 @@ with st.sidebar:
     )
 
     st.divider()
+    st.subheader("� Upload PDF")
+    uploaded_pdf = st.file_uploader("Choose a PDF file", type=["pdf"], label_visibility="collapsed")
+    pdf_strategy = st.selectbox(
+        "Chunking strategy (PDF)",
+        ["recursive", "fixed", "semantic", "hierarchical", "late", "docling"],
+        index=0,
+        key="pdf_strategy",
+    )
+    if st.button("Upload & Ingest PDF", use_container_width=True, disabled=uploaded_pdf is None):
+        with st.spinner("Saving and ingesting PDF..."):
+            try:
+                import os
+                uploads_dir = "/uploads"
+                os.makedirs(uploads_dir, exist_ok=True)
+                safe_name = uploaded_pdf.name.replace(" ", "_")
+                upload_path = os.path.join(uploads_dir, safe_name)
+                with open(upload_path, "wb") as f:
+                    f.write(uploaded_pdf.getvalue())
+                headers = _auth_headers()
+                r = httpx.post(
+                    f"{API_BASE}/ingest",
+                    json={
+                        "pdf_paths": [upload_path],
+                        "tenant_id": st.session_state.tenant_id,
+                        "chunking_strategy": pdf_strategy,
+                        "enable_raptor": False,
+                    },
+                    headers=headers,
+                    timeout=30,
+                )
+                r.raise_for_status()
+                data = r.json()
+                st.success(f"Job queued: `{data.get('job_id', 'unknown')}`")
+            except Exception as exc:
+                st.error(f"Ingest failed: {exc}")
+
+    st.divider()
     st.subheader("📥 Ingest ArXiv Papers")
     arxiv_ids_input = st.text_area(
         "ArXiv IDs (one per line)",
@@ -78,7 +120,7 @@ with st.sidebar:
         ["recursive", "fixed", "semantic", "hierarchical", "late"],
         index=0,
     )
-    if st.button("Ingest", use_container_width=True):
+    if st.button("Ingest ArXiv", use_container_width=True):
         ids = [x.strip() for x in arxiv_ids_input.splitlines() if x.strip()]
         if ids:
             with st.spinner(f"Ingesting {len(ids)} paper(s)..."):
@@ -89,8 +131,8 @@ with st.sidebar:
                         json={
                             "arxiv_ids": ids,
                             "tenant_id": st.session_state.tenant_id,
-                            "chunk_strategy": ingest_strategy,
-                            "raptor_enabled": True,
+                            "chunking_strategy": ingest_strategy,
+                            "enable_raptor": True,
                         },
                         headers=headers,
                         timeout=30,
@@ -112,24 +154,19 @@ with st.sidebar:
         st.rerun()
 
 
-def _auth_headers() -> dict[str, str]:
-    tok = st.session_state.jwt_token
-    return {"Authorization": f"Bearer {tok}"} if tok else {}
-
-
 def _highlight_snippet(text: str, query: str, max_len: int = 300) -> str:
     """Return a truncated snippet of text (no true highlighting in Streamlit)."""
     return text[:max_len] + ("…" if len(text) > max_len else "")
 
 
-def _stream_sse(query: str) -> None:
-    """Call the /chat/stream endpoint and render events in real-time."""
-    url = f"{API_BASE}/chat/stream"
-    params = {
+def _stream_sse(query: str) -> str:
+    """Call the /chat endpoint and render SSE events in real-time. Returns the full answer."""
+    url = f"{API_BASE}/chat"
+    body = {
         "query": query,
         "tenant_id": st.session_state.tenant_id,
-        "enable_crag": str(st.session_state.enable_crag).lower(),
-        "enable_self_rag": str(st.session_state.enable_self_rag).lower(),
+        "enable_crag": st.session_state.enable_crag,
+        "enable_self_rag": st.session_state.enable_self_rag,
     }
     headers = {**_auth_headers(), "Accept": "text/event-stream"}
 
@@ -140,7 +177,7 @@ def _stream_sse(query: str) -> None:
 
     try:
         with httpx.Client(timeout=120) as client:
-            with client.stream("GET", url, params=params, headers=headers) as resp:
+            with client.stream("POST", url, json=body, headers=headers) as resp:
                 resp.raise_for_status()
                 for line in resp.iter_lines():
                     if not line.startswith("data:"):
@@ -165,8 +202,7 @@ def _stream_sse(query: str) -> None:
                     elif etype == "citation":
                         citations.append(event.get("data", {}))
 
-                    elif etype == "done":
-                        # Final diagnostics arrive here
+                    elif etype == "diagnostics":
                         diag = event.get("data", {})
                         st.session_state.diagnostics = [diag]
 
@@ -174,14 +210,22 @@ def _stream_sse(query: str) -> None:
                         st.error(f"Pipeline error: {event.get('data', {}).get('message')}")
                         return
 
-        answer_placeholder.markdown("".join(answer_tokens))
+        final_answer = "".join(answer_tokens)
+        answer_placeholder.markdown(final_answer)
         st.session_state.citations = citations
         st.session_state.retrieval_details = retrieval_details
+        return final_answer
 
     except httpx.HTTPStatusError as exc:
-        st.error(f"API error {exc.response.status_code}: {exc.response.text}")
+        try:
+            detail = exc.response.read().decode()
+        except Exception:
+            detail = str(exc)
+        st.error(f"API error {exc.response.status_code}: {detail}")
+        return ""
     except Exception as exc:
         st.error(f"Request failed: {exc}")
+        return ""
 
 
 st.title("🔬 Production RAG — Scientific Paper Q&A")
@@ -198,10 +242,10 @@ if user_input := st.chat_input("Ask a question about the ingested papers…"):
         st.markdown(user_input)
 
     with st.chat_message("assistant"):
-        _stream_sse(user_input)
+        final_answer = _stream_sse(user_input)
 
-    # Save the assistant message (last complete answer)
-    # (The answer is already rendered in place; we capture it for history)
+    if final_answer:
+        st.session_state.messages.append({"role": "assistant", "content": final_answer})
 
 
 if st.session_state.retrieval_details or st.session_state.citations or st.session_state.diagnostics:
@@ -212,18 +256,22 @@ if st.session_state.retrieval_details or st.session_state.citations or st.sessio
             if st.session_state.retrieval_details:
                 st.subheader("Retrieved context chunks")
                 for i, chunk in enumerate(st.session_state.retrieval_details[:10], 1):
-                    score_parts = []
-                    if chunk.get("rrf_score") is not None:
-                        score_parts.append(f"RRF={chunk['rrf_score']:.4f}")
-                    if chunk.get("rerank_score") is not None:
-                        score_parts.append(f"Rerank={chunk['rerank_score']:.4f}")
-                    score_str = " | ".join(score_parts) if score_parts else ""
+                    score = chunk.get("score")
+                    score_str = f"Score={score:.4f}" if score is not None else ""
                     with st.container(border=True):
-                        st.caption(f"**Chunk {i}** — {score_str}")
-                        st.text(chunk.get("text", "")[:250])
-                        meta = chunk.get("metadata", {})
-                        if meta.get("source"):
-                            st.caption(f"Source: {meta['source']}")
+                        chunk_type = chunk.get("chunk_type", "text")
+                        type_badge = " 📊 TABLE" if chunk_type == "table" else (" 🖼️ FIGURE" if chunk_type == "figure" else "")
+                        st.caption(f"**Chunk {i}**{type_badge} — {score_str}")
+                        st.text(chunk.get("snippet", "")[:250])
+                        source_parts = []
+                        if chunk.get("title"):
+                            source_parts.append(chunk["title"])
+                        if chunk.get("arxiv_id"):
+                            source_parts.append(f"arXiv:{chunk['arxiv_id']}")
+                        if chunk.get("page"):
+                            source_parts.append(f"p.{chunk['page']}")
+                        if source_parts:
+                            st.caption("Source: " + " | ".join(source_parts))
 
         with col_right:
             if st.session_state.diagnostics:
@@ -232,21 +280,21 @@ if st.session_state.retrieval_details or st.session_state.citations or st.sessio
                 st.metric("CRAG hops", diag.get("adaptive_hops", 0))
                 st.metric(
                     "Retrieval quality score",
-                    f"{diag.get('retrieval_quality_score', 0.0):.3f}",
+                    f"{diag.get('quality_score', 0.0):.3f}",
                 )
-                st.metric("Chunks retrieved", diag.get("total_chunks_retrieved", 0))
-                st.metric("Chunks after rerank", diag.get("chunks_after_rerank", 0))
+                st.metric("Chunks retrieved", diag.get("candidate_count", 0))
+                st.metric("Chunks after rerank", diag.get("reranked_count", 0))
 
     if st.session_state.citations:
         with st.expander("📎 Citations", expanded=False):
             for cit in st.session_state.citations:
                 with st.container(border=True):
-                    st.markdown(f"**[{cit.get('citation_marker', '')}]**")
+                    st.markdown(f"**[{cit.get('citation_id', '')}]**")
                     st.caption(
                         f"Title: {cit.get('title', 'N/A')} | "
-                        f"Authors: {', '.join(cit.get('authors', [])[:3])} | "
-                        f"ArXiv: {cit.get('arxiv_id', 'N/A')}"
+                        f"ArXiv: {cit.get('arxiv_id', 'N/A')} | "
+                        f"Page: {cit.get('page', 'N/A')}"
                     )
-                    snippet = cit.get("text_snippet", "")
+                    snippet = cit.get("snippet", "")
                     if snippet:
                         st.text(_highlight_snippet(snippet, ""))

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import threading
 from collections.abc import AsyncGenerator
 from typing import Any
 
@@ -115,7 +116,11 @@ class LLMClient:
         temperature: float | None = None,
         max_tokens: int = 2048,
     ) -> AsyncGenerator[str, None]:
-        """Yield token strings from a streaming completion."""
+        """Yield token strings from a streaming completion.
+
+        Uses sync litellm.completion in a background thread because
+        litellm.acompletion with stream=True can hang on some providers.
+        """
         s = self._settings
         provider = s.llm_default_provider
         model = s.llm_fast_model if use_fast_model else s.llm_default_model
@@ -123,11 +128,36 @@ class LLMClient:
         temp = temperature if temperature is not None else s.llm_temperature
 
         log.debug("llm.stream", model=model_str)
-        response = await self._call(messages, model_str, temp, max_tokens, stream=True)
-        async for chunk in response:
-            delta = chunk.choices[0].delta
-            if delta and delta.content:
-                yield delta.content
+
+        loop = asyncio.get_event_loop()
+        q: asyncio.Queue[str | None] = asyncio.Queue()
+
+        def _sync_stream() -> None:
+            try:
+                resp = litellm.completion(
+                    model=model_str,
+                    messages=messages,
+                    temperature=temp,
+                    max_tokens=max_tokens,
+                    stream=True,
+                )
+                for chunk in resp:
+                    delta = chunk.choices[0].delta
+                    if delta and delta.content:
+                        loop.call_soon_threadsafe(q.put_nowait, delta.content)
+            except Exception as exc:
+                log.error("llm.stream.error", error=str(exc))
+            finally:
+                loop.call_soon_threadsafe(q.put_nowait, None)  # sentinel
+
+        t = threading.Thread(target=_sync_stream, daemon=True)
+        t.start()
+
+        while True:
+            token = await q.get()
+            if token is None:
+                break
+            yield token
 
     async def complete_json(
         self,
