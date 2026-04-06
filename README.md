@@ -1,6 +1,7 @@
 # ScholarRAG — Production-Grade RAG for Scientific Papers
 
-> A fully containerised Retrieval-Augmented Generation system built for scientific and technical documents — with support for structured table extraction, adaptive retrieval, streaming answers, and inline citations.
+>An Agentic and Multimodal RAG system for scientific and technical literature. Goes beyond standard RAG with autonomous self-correction loops (CRAG + Self-RAG), hybrid retrieval with BGE reranking, 6 chunking strategies including RAPTOR and Docling table extraction, and multimodal LLM routing for visual reasoning over figures and charts — with full observability, async ingestion, and Docker deployment.
+>
 
 ![Python](https://img.shields.io/badge/Python-3.11-blue?logo=python)
 ![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker)
